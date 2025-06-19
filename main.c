@@ -3,11 +3,12 @@
 #include <stdlib.h>
 #include <dirent.h>
 #include <sys/types.h>
+#include <unistd.h>
 #include <openssl/aes.h>
+#include <openssl/sha.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
 
-#define KEY_SIZE 32
 #define AES_ENC 256
 #define IV_SIZE 16
 
@@ -17,49 +18,66 @@ void handle_errors(const char *msg) {
 }
 
 int get_key(char* key) {
+	int cap = 16 * sizeof(char), len = 0;
+
 	printf("[+] Enter Master Password: ");
-	if (fgets(key, KEY_SIZE - 2, stdin) == NULL) {
-		perror("[!] Error taking input!\n");
+	char* str = (char*) malloc(cap);
+	if (!str) {
+		fprintf(stderr, "[!] Error allocating memory!\n");
 		return 1;
 	}
 
-	int len = (int) strlen(key);
-	if (len < KEY_SIZE - 1) {
-		memset(key, '@', (KEY_SIZE - 1 - len));
+	char c;
+	while ((c = getchar() != '\n') && c != EOF) {
+		if (len + 1 >= cap) {
+			cap *= 2;
+			char* temp = (char*) realloc(str, cap);
+			if (!temp) {
+				fprintf(stderr, "[!] Error allocating memory!\n");
+				return 1;
+			}
+
+			str = temp;
+			temp = NULL;
+		}
+
+		str[len++] = c;
 	}
 
-	// just hash ts ig
+	str[len] = '\0';
 
-	key[KEY_SIZE - 1] = '\0';
+	SHA256((const unsigned char*) str, len, (unsigned char*) key);
+
+	free(str);
 	return 0;
 }
 
 void encrypt_file(const char* filename, const unsigned char* key) {
 	FILE* fptr = fopen(filename, "rb+");
 	if (!fptr) {
-		perror("[!] Error opening file\n");
+		fprintf(stderr, "[!] Error opening file\n");
 		return;
 	}
 
 	fseek(fptr, 0, SEEK_END);
-	long size = ftell(fptr) * sizeof(char);
+	size_t size = ftell(fptr) * sizeof(char);
+	fseek(fptr, 0, SEEK_SET);
 
 	if (size <= 0) {
-		perror("[!] Empyty file!\n");
+		fprintf(stderr, "[!] Empyty file!\n");
 		fclose(fptr);
 		return;
 	}
 
-	fseek(fptr, 0, SEEK_SET);
 	char* buffer = (char*) malloc(size);
 	if (!buffer) {
-		perror("[!] Error allocating memory!\n");
+		fprintf(stderr, "[!] Error allocating memory!\n");
 		fclose(fptr);
 		return;
 	}
 
-	if (size != (long) fread(buffer, 1, size, fptr)) {
-		perror("[!] Error reading from file\n");
+	if (size != fread(buffer, 1, size, fptr)) {
+		fprintf(stderr, "[!] Error reading from file\n");
 		fclose(fptr);
 		free(buffer);
 		return;
@@ -67,7 +85,7 @@ void encrypt_file(const char* filename, const unsigned char* key) {
 
 	unsigned char* ciphertext = malloc(size + 16);
 	if (!ciphertext) {
-		perror("[!] Error allocating memory!\n");
+		fprintf(stderr, "[!] Error allocating memory!\n");
 		fclose(fptr);
 		free(buffer);
 		return;
@@ -80,7 +98,7 @@ void encrypt_file(const char* filename, const unsigned char* key) {
 	EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
     if (!ctx) handle_errors("EVP_CIPHER_CTX_new");
 
-    int len, ciphertext_len;
+    int len = 0, ciphertext_len = 0;
 
     if (1 != EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv))
         handle_errors("EVP_EncryptInit_ex");
@@ -97,30 +115,149 @@ void encrypt_file(const char* filename, const unsigned char* key) {
 
     EVP_CIPHER_CTX_free(ctx);
 
-	for (int i = 0; i < 16; i++) {
-		printf("%02x", iv[i]);
+	fseek(fptr, 0, SEEK_SET);
+	if (IV_SIZE != fwrite(iv, 1, IV_SIZE, fptr)) {
+		fprintf(stderr, "[!] Error writting iv to file!\n");
+		fclose(fptr);
+		free(ciphertext);
+		free(buffer);
+		return;
 	}
-	printf("\n");
 
-	for (int i = 0; i < ciphertext_len; i++) {
-		printf("%02x", ciphertext[i]);
+	if (ciphertext_len != (int) fwrite(ciphertext, 1, ciphertext_len, fptr)) {
+		fprintf(stderr, "[!] Error writting encrypted to file!\n");
+		fclose(fptr);
+		free(ciphertext);
+		free(buffer);
+		return;
 	}
-	printf("\n");
 
+	if (0 != ftruncate(fileno(fptr), IV_SIZE + ciphertext_len)) {
+        fprintf(stderr, "[!] Failed to truncate file\n");
+		fclose(fptr);
+		free(ciphertext);
+		free(buffer);
+		return;
+	}
+
+	// cleanup
 	fclose(fptr);
 	free(ciphertext);
 	free(buffer);
+
+	printf("[+] Encrypted %s\n", filename);
 }
 
-void decrypt_file(const char* filename) {}
+void decrypt_file(const char* filename, const unsigned char* key) {
+	FILE* fptr = fopen(filename, "rb+");
+	if (!fptr) {
+		fprintf(stderr, "[!] Error opening file: %s\n", filename);
+		return;
+	}
+
+	fseek(fptr, 0, SEEK_END); // go to end of file
+	size_t file_size = ftell(fptr) * sizeof(char);
+	fseek(fptr, 0, SEEK_SET); // go to start of file
+
+	if (file_size <= 0) {
+		fprintf(stderr, "[!] %s a empty file\n", filename);
+		fclose(fptr);
+		return;
+	}
+
+	char* buffer = (char*) malloc(file_size);
+	if (!buffer) {
+		fprintf(stderr, "[!] Error allocating memory!\n");
+		fclose(fptr);
+		return;
+	}
+
+	if (file_size != fread(buffer, 1, file_size, fptr)) {
+		fprintf(stderr, "[!] Error reading from file\n");
+		fclose(fptr);
+		free(buffer);
+		return;
+	}
+
+	unsigned char iv[IV_SIZE];
+	memcpy(iv, buffer, IV_SIZE);
+
+	char* buffer_offset = buffer + IV_SIZE; // move pointer to start of the message
+
+	unsigned char* out = (unsigned char*) malloc(file_size);
+	if (!out) {
+		free(buffer);
+		fclose(fptr);
+		fprintf(stderr, "[!] Error allocating memory!\n");
+		return;
+	}
+
+	// Decryption Starts
+	EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+	if (!ctx) {
+		free(out);
+		free(buffer);
+		fclose(fptr);
+		handle_errors("Evp_cipher_ctx_new()");
+	}
+
+	int len = 0, plaintext_len = 0;
+
+	if (1 != EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv)) {
+		free(out);
+		free(buffer);
+		fclose(fptr);
+		handle_errors("DecryptInit");
+	}
+
+	if (1 != EVP_DecryptUpdate(ctx, out, &len, (const unsigned char*) buffer_offset, file_size - IV_SIZE)) {
+		free(buffer);
+		free(out);
+		fclose(fptr);
+		handle_errors("EVP_DecryptUpdate");
+	}
+
+	plaintext_len = len;
+
+	if (1 != EVP_DecryptFinal_ex(ctx, out + len, &len)) {
+		free(buffer);
+		free(out);
+		fclose(fptr);
+		handle_errors("EVP_DecryptFinal_ex");
+	}
+
+	plaintext_len += len;
+
+	fseek(fptr, 0, SEEK_SET);
+	if ((unsigned long) plaintext_len != fwrite(out, 1, plaintext_len, fptr)) {
+		free(buffer);
+		free(out);
+		fclose(fptr);
+		handle_errors("fwrite");
+	}
+
+	if (0 != ftruncate(fileno(fptr), plaintext_len)) {
+		free(buffer);
+		free(out);
+		fclose(fptr);
+		handle_errors("ftruncate");
+	}
+
+	EVP_CIPHER_CTX_free(ctx);
+	free(buffer);
+	free(out);
+	fclose(fptr);
+
+	printf("[+] Decrypted %s\n", filename);
+}
 
 int main(int args, char** argv) {
 	if (args < 2) {
-		perror("[!] Please enter a file name\n");
+		fprintf(stderr, "[!] Please enter a file name\n");
 		return 1;
 	}
 
-	char key[KEY_SIZE];
+	char key[SHA256_DIGEST_LENGTH];
 	if (get_key(key)) {
 		return 1;
 	}
@@ -133,7 +270,6 @@ int main(int args, char** argv) {
 			}
 
 			// handle a directory too check if its a directory if error recvied ENOTDIR then loop over the directories
-			printf("Enc\n");
 			encrypt_file(argv[i + 1], (const unsigned char*) key);
 			break;
 		}
@@ -144,7 +280,7 @@ int main(int args, char** argv) {
 				break;
 			}
 
-			decrypt_file(argv[i + 1]);
+			decrypt_file(argv[i + 1], (const unsigned char*) key);
 			break;
 		}
 	}

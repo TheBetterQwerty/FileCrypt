@@ -4,6 +4,7 @@
 #include <dirent.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <openssl/aes.h>
 #include <openssl/sha.h>
 #include <openssl/evp.h>
@@ -249,6 +250,45 @@ void decrypt_file(const char* filename, const unsigned char* key) {
 	fclose(fptr);
 
 	printf("[+] Decrypted %s\n", filename);
+}
+
+void iter_folder(const char* file, const char* key, int enc) {
+	struct stat path_stat;
+	if (stat(file, &path_stat) != 0) {
+		fprintf(stderr, "[!] Stat failed\n");
+		return;
+	}
+
+	if (S_ISREG(path_stat.st_mode)) {
+		if (enc) {
+			encrypt_file(file, (const unsigned char*) key);
+		} else {
+			decrypt_file(file, (const unsigned char*) key);
+		}
+		return;
+	}
+
+	DIR* dir = opendir(file);
+	if (!dir) {
+		fprintf(stderr, "[!] Error opening file!\n");
+		return;
+	}
+
+	struct dirent* entry;
+	while ((entry = readdir(dir)) != NULL) {
+		if (entry->d_type == DT_DIR) {
+			iter_folder(entry->d_name, key, enc);
+		}
+
+		if (entry->d_type == DT_UNKNOWN || entry->d_type == DT_LNK) continue;
+
+		if (enc) {
+			encrypt_file(entry->d_name, (const unsigned char*) key);
+			continue;
+		}
+
+		decrypt_file(entry->d_name, (const unsigned char*) key);
+	}
 }
 
 int main(int args, char** argv) {

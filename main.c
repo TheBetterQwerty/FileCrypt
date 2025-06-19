@@ -2,14 +2,15 @@
 #include <string.h>
 #include <stdlib.h>
 #include <dirent.h>
-#include <sys/types.h>
 #include <unistd.h>
+#include <errno.h>
 #include <sys/stat.h>
 #include <openssl/aes.h>
 #include <openssl/sha.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
 
+#define MAX_PATH 2096
 #define AES_ENC 256
 #define IV_SIZE 16
 
@@ -252,43 +253,64 @@ void decrypt_file(const char* filename, const unsigned char* key) {
 	printf("[+] Decrypted %s\n", filename);
 }
 
-void iter_folder(const char* file, const char* key, int enc) {
+void iter_folder(const char* path, const char* key, int enc) {
 	struct stat path_stat;
-	if (stat(file, &path_stat) != 0) {
-		fprintf(stderr, "[!] Stat failed\n");
+	if (0 != stat(path, &path_stat)) {
+		fprintf(stderr, "[!] %s\n", strerror(errno));
 		return;
 	}
 
 	if (S_ISREG(path_stat.st_mode)) {
 		if (enc) {
-			encrypt_file(file, (const unsigned char*) key);
-		} else {
-			decrypt_file(file, (const unsigned char*) key);
+			encrypt_file(path, (const unsigned char*) key);
+			return;
 		}
+		decrypt_file(path, (const unsigned char*) key);
 		return;
 	}
 
-	DIR* dir = opendir(file);
+	if (!S_ISDIR(path_stat.st_mode)) {
+		return;
+	}
+
+	DIR* dir = opendir(path);
 	if (!dir) {
-		fprintf(stderr, "[!] Error opening file!\n");
+		fprintf(stderr, "[!] Error opening directory!\n");
 		return;
 	}
 
 	struct dirent* entry;
 	while ((entry = readdir(dir)) != NULL) {
-		if (entry->d_type == DT_DIR) {
-			iter_folder(entry->d_name, key, enc);
-		}
+		char file[MAX_PATH];
 
-		if (entry->d_type == DT_UNKNOWN || entry->d_type == DT_LNK) continue;
+		if (!strncmp(entry->d_name, ".", 1) || !strncmp(entry->d_name, "..", 2)) continue;
 
-		if (enc) {
-			encrypt_file(entry->d_name, (const unsigned char*) key);
+		snprintf(file, MAX_PATH, "%s/%s", path, entry->d_name);
+
+		struct stat _path_stat;
+		if (0 != lstat(file, &_path_stat)) {
+			fprintf(stderr, "[!] %s\n", strerror(errno));
 			continue;
 		}
 
-		decrypt_file(entry->d_name, (const unsigned char*) key);
+		if (S_ISLNK(_path_stat.st_mode)) {
+			continue;
+		}
+
+		if (S_ISDIR(_path_stat.st_mode)) {
+			iter_folder(file, key, enc);
+		}
+
+		if (S_ISREG(_path_stat.st_mode)) {
+			if (enc) {
+				encrypt_file(file, (const unsigned char*) key);
+				continue;
+			}
+			decrypt_file(file, (const unsigned char*) key);
+		}
 	}
+
+	closedir(dir);
 }
 
 int main(int args, char** argv) {

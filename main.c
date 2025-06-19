@@ -57,7 +57,7 @@ int get_key(char* key) {
 void encrypt_file(const char* filename, const unsigned char* key) {
 	FILE* fptr = fopen(filename, "rb+");
 	if (!fptr) {
-		fprintf(stderr, "[!] Error opening file\n");
+		fprintf(stderr, "[!] %s\n", strerror(errno));
 		return;
 	}
 
@@ -153,7 +153,7 @@ void encrypt_file(const char* filename, const unsigned char* key) {
 void decrypt_file(const char* filename, const unsigned char* key) {
 	FILE* fptr = fopen(filename, "rb+");
 	if (!fptr) {
-		fprintf(stderr, "[!] Error opening file: %s\n", filename);
+		fprintf(stderr, "[!] %s\n", strerror(errno));
 		return;
 	}
 
@@ -275,7 +275,7 @@ void iter_folder(const char* path, const char* key, int enc) {
 
 	DIR* dir = opendir(path);
 	if (!dir) {
-		fprintf(stderr, "[!] Error opening directory!\n");
+		fprintf(stderr, "[!] %s\n", strerror(errno));
 		return;
 	}
 
@@ -313,9 +313,21 @@ void iter_folder(const char* path, const char* key, int enc) {
 	closedir(dir);
 }
 
+void print_help(const char* prog_name) {
+    printf("Usage:\n");
+    printf("  %s [option] <folder>\n\n", prog_name);
+    printf("Options:\n");
+    printf("  -e, --encrypt <folder>   Encrypt all files in the specified folder\n");
+    printf("  -d, --decrypt <folder>   Decrypt all files in the specified folder\n");
+    printf("  -h, --help               Show this help message and exit\n\n");
+    printf("Examples:\n");
+    printf("  myprogram --encrypt /path/to/folder\n");
+    printf("  myprogram -d /path/to/folder\n");
+}
+
 int main(int args, char** argv) {
 	if (args < 2) {
-		fprintf(stderr, "[!] Please enter a file name\n");
+		printf("[?] Missing arguments. Try '%s --help' for more info\n", argv[0]);
 		return 1;
 	}
 
@@ -325,24 +337,28 @@ int main(int args, char** argv) {
 	}
 
 	for (int i = 0; i < args; i++) {
-		if ((strncmp(argv[i], "--encrypt", 9) == 0) || (strncmp(argv[i], "-e", 9) == 0)) {
+		if ((strncmp(argv[i], "--help", 6) == 0) || (strncmp(argv[i], "-h", 2) == 0)) {
+			print_help(argv[0]);
+			return 0;
+		}
+
+		if ((strncmp(argv[i], "--encrypt", 9) == 0) || (strncmp(argv[i], "-e", 2) == 0)) {
 			if ( i + 1 >= args) {
 				printf("[?] Missing argument for %s!\n", argv[i]);
 				break;
 			}
 
-			// handle a directory too check if its a directory if error recvied ENOTDIR then loop over the directories
-			encrypt_file(argv[i + 1], (const unsigned char*) key);
+			iter_folder(argv[i + 1], (const char*) key, 1);
 			break;
 		}
 
-		if ((strncmp(argv[i], "--decrypt", 9) == 0) || (strncmp(argv[i], "-d", 9) == 0)) {
+		if ((strncmp(argv[i], "--decrypt", 9) == 0) || (strncmp(argv[i], "-d", 2) == 0)) {
 			if ( i + 1 >= args) {
 				printf("[?] Missing argument for %s!\n", argv[i]);
 				break;
 			}
 
-			decrypt_file(argv[i + 1], (const unsigned char*) key);
+			iter_folder(argv[i + 1], (const char*) key, 0);
 			break;
 		}
 	}

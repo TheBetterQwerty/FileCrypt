@@ -321,8 +321,8 @@ void print_help(const char* prog_name) {
     printf("  -d, --decrypt <folder>   Decrypt all files in the specified folder\n");
     printf("  -h, --help               Show this help message and exit\n\n");
     printf("Examples:\n");
-    printf("  myprogram --encrypt /path/to/folder\n");
-    printf("  myprogram -d /path/to/folder\n");
+    printf("  %s --encrypt /path/to/folder\n", prog_name);
+    printf("  %s -d /path/to/folder\n", prog_name);
 }
 
 int main(int args, char** argv) {

@@ -332,9 +332,6 @@ int main(int args, char** argv) {
 	}
 
 	char key[SHA256_DIGEST_LENGTH];
-	if (get_key(key)) {
-		return 1;
-	}
 
 	for (int i = 0; i < args; i++) {
 		if ((strncmp(argv[i], "--help", 6) == 0) || (strncmp(argv[i], "-h", 2) == 0)) {
@@ -348,6 +345,10 @@ int main(int args, char** argv) {
 				break;
 			}
 
+			if (get_key(key)) {
+				return 1;
+			}
+
 			iter_folder(argv[i + 1], (const char*) key, 1);
 			break;
 		}
@@ -356,6 +357,10 @@ int main(int args, char** argv) {
 			if ( i + 1 >= args) {
 				printf("[?] Missing argument for %s!\n", argv[i]);
 				break;
+			}
+
+			if (get_key(key)) {
+				return 1;
 			}
 
 			iter_folder(argv[i + 1], (const char*) key, 0);

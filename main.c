@@ -334,12 +334,12 @@ int main(int args, char** argv) {
 	char key[SHA256_DIGEST_LENGTH];
 
 	for (int i = 0; i < args; i++) {
-		if ((strncmp(argv[i], "--help", 6) == 0) || (strncmp(argv[i], "-h", 2) == 0)) {
+		if ((strcmp(argv[i], "--help") == 0) || (strcmp(argv[i], "-h") == 0)) {
 			print_help(argv[0]);
 			return 0;
 		}
 
-		if ((strncmp(argv[i], "--encrypt", 9) == 0) || (strncmp(argv[i], "-e", 2) == 0)) {
+		if ((strcmp(argv[i], "--encrypt") == 0) || (strcmp(argv[i], "-e") == 0)) {
 			if ( i + 1 >= args) {
 				printf("[?] Missing argument for %s!\n", argv[i]);
 				break;
@@ -353,7 +353,7 @@ int main(int args, char** argv) {
 			break;
 		}
 
-		if ((strncmp(argv[i], "--decrypt", 9) == 0) || (strncmp(argv[i], "-d", 2) == 0)) {
+		if ((strcmp(argv[i], "--decrypt") == 0) || (strcmp(argv[i], "-d") == 0)) {
 			if ( i + 1 >= args) {
 				printf("[?] Missing argument for %s!\n", argv[i]);
 				break;

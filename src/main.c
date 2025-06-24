@@ -20,7 +20,7 @@ void handle_errors(const char *msg) {
 }
 
 int get_key(char* key) {
-	int cap = 16 * sizeof(char), len = 0;
+	size_t cap = 16 * sizeof(char), len = 0;
 
 	printf("[+] Enter Master Password: ");
 	char* str = (char*) malloc(cap);
@@ -85,7 +85,7 @@ void encrypt_file(const char* filename, const unsigned char* key) {
 		return;
 	}
 
-	unsigned char* ciphertext = malloc(size + 16);
+	unsigned char* ciphertext = malloc(size + IV_SIZE);
 	if (!ciphertext) {
 		fprintf(stderr, "[!] Error allocating memory!\n");
 		fclose(fptr);
@@ -255,7 +255,7 @@ void decrypt_file(const char* filename, const unsigned char* key) {
 
 void iter_folder(const char* path, const char* key, int enc) {
 	struct stat path_stat;
-	if (0 != stat(path, &path_stat)) {
+	if (0 != lstat(path, &path_stat)) {
 		fprintf(stderr, "[!] %s\n", strerror(errno));
 		return;
 	}
@@ -332,6 +332,7 @@ int main(int args, char** argv) {
 	}
 
 	char key[SHA256_DIGEST_LENGTH];
+	int flag = 0;
 
 	for (int i = 0; i < args; i++) {
 		if ((strcmp(argv[i], "--help") == 0) || (strcmp(argv[i], "-h") == 0)) {
@@ -340,6 +341,8 @@ int main(int args, char** argv) {
 		}
 
 		if ((strcmp(argv[i], "--encrypt") == 0) || (strcmp(argv[i], "-e") == 0)) {
+			flag++;
+
 			if ( i + 1 >= args) {
 				printf("[?] Missing argument for %s!\n", argv[i]);
 				break;
@@ -354,6 +357,8 @@ int main(int args, char** argv) {
 		}
 
 		if ((strcmp(argv[i], "--decrypt") == 0) || (strcmp(argv[i], "-d") == 0)) {
+			flag++;
+
 			if ( i + 1 >= args) {
 				printf("[?] Missing argument for %s!\n", argv[i]);
 				break;
@@ -366,6 +371,14 @@ int main(int args, char** argv) {
 			iter_folder(argv[i + 1], (const char*) key, 0);
 			break;
 		}
+	}
+
+	if (!flag) {
+		printf("[?] Invalid argument \'");
+		for (int i = 1; i < args; i++)
+			printf("%s", argv[i]);
+		printf("\'. Try '%s --help' for more info\n", argv[0]);
+		return 1;
 	}
 
 	return 0;

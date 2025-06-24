@@ -283,7 +283,7 @@ void iter_folder(const char* path, const char* key, int enc) {
 	while ((entry = readdir(dir)) != NULL) {
 		char file[MAX_PATH];
 
-		if (!strncmp(entry->d_name, ".", 1) || !strncmp(entry->d_name, "..", 2)) continue;
+		if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
 
 		snprintf(file, MAX_PATH, "%s/%s", path, entry->d_name);
 

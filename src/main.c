@@ -50,7 +50,9 @@ int get_key(char* key) {
 
 	SHA256((const unsigned char*) str, len, (unsigned char*) key);
 
+	memset(str, 0, len); // to prevent RAM dumps
 	free(str);
+
 	return 0;
 }
 

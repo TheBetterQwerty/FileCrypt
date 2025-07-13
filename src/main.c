@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <termios.h>
 #include <errno.h>
 #include <sys/stat.h>
 #include <openssl/aes.h>
@@ -19,17 +20,33 @@ void handle_errors(const char *msg) {
     exit(EXIT_FAILURE);
 }
 
-int get_key(char* key) {
-	size_t cap = 16 * sizeof(char), len = 0;
+int hashcmp(const uint8_t* hash_t, const uint8_t* hash_tt) {
+	uint8_t res = 0;
+	for (size_t i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+		res |= hash_t[i] ^ hash_tt[i];
+	}
 
-	printf("[+] Enter Master Password: ");
+	return res;
+}
+
+int get_key(const char* buf, char* key) {
+	size_t cap = 16 * sizeof(char), len = 0;
+	char c;
+
+	fprintf(stdout, "%s ", buf);
 	char* str = (char*) malloc(cap);
 	if (!str) {
 		fprintf(stderr, "[!] Error allocating memory!\n");
 		return 1;
 	}
 
-	char c;
+	struct termios old, new;
+
+	tcgetattr(STDIN_FILENO, &old);
+	new = old;
+	new.c_lflag &= ~(ECHO);
+	tcsetattr(STDIN_FILENO, TCSANOW, &new);
+
 	while ((c = getchar() != '\n') && c != EOF) {
 		if (len + 1 >= cap) {
 			cap *= 2;
@@ -48,11 +65,14 @@ int get_key(char* key) {
 
 	str[len] = '\0';
 
+	tcsetattr(STDIN_FILENO, TCSANOW, &old);
+
 	SHA256((const unsigned char*) str, len, (unsigned char*) key);
 
 	memset(str, 0, len); // to prevent RAM dumps
 	free(str);
 
+	printf("\n");
 	return 0;
 }
 
@@ -67,7 +87,7 @@ void encrypt_file(const char* filename, const unsigned char* key) {
 	size_t size = ftell(fptr) * sizeof(char);
 	fseek(fptr, 0, SEEK_SET);
 
-	if (size < 0) {
+	if (size <= 0) {
 		fprintf(stderr, "[!] Empyty file!\n");
 		fclose(fptr);
 		return;
@@ -333,7 +353,7 @@ int main(int args, char** argv) {
 		return 1;
 	}
 
-	char key[SHA256_DIGEST_LENGTH];
+	char key[SHA256_DIGEST_LENGTH], _key[SHA256_DIGEST_LENGTH];
 	int flag = 0;
 
 	for (int i = 0; i < args; i++) {
@@ -350,10 +370,14 @@ int main(int args, char** argv) {
 				break;
 			}
 
-			if (get_key(key)) {
+			if (get_key("[+] Enter master key ->", key) && get_key("[+] Enter master key again ->", _key)) {
+				fprintf(stderr, "[!] Error: getting password input\n");
 				return 1;
 			}
 
+			if (hashcmp((const uint8_t*) key, (const uint8_t*) _key)) {
+				fprintf(stderr, "[!] Password doesn't match !\n");
+			}
 			iter_folder(argv[i + 1], (const char*) key, 1);
 			break;
 		}
@@ -366,7 +390,13 @@ int main(int args, char** argv) {
 				break;
 			}
 
-			if (get_key(key)) {
+			if (get_key("[+] Enter master key ->", key) && get_key("[+] Enter master key again ->", _key)) {
+				fprintf(stderr, "[!] Error: getting password input\n");
+				return 1;
+			}
+
+			if (hashcmp((const uint8_t*) key, (const uint8_t*) _key)) {
+				fprintf(stderr, "[!] Password doesn't match !\n");
 				return 1;
 			}
 

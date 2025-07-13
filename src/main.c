@@ -67,7 +67,7 @@ void encrypt_file(const char* filename, const unsigned char* key) {
 	size_t size = ftell(fptr) * sizeof(char);
 	fseek(fptr, 0, SEEK_SET);
 
-	if (size <= 0) {
+	if (size < 0) {
 		fprintf(stderr, "[!] Empyty file!\n");
 		fclose(fptr);
 		return;

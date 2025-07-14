@@ -370,14 +370,19 @@ int main(int args, char** argv) {
 				break;
 			}
 
-			if (get_key("[+] Enter master key ->", key) && get_key("[+] Enter master key again ->", _key)) {
-				fprintf(stderr, "[!] Error: getting password input\n");
+			if (get_key("[+] Enter master key ->", key)) {
+				return 1;
+			}
+
+			if (get_key("[+] Enter master key again ->", _key)) {
 				return 1;
 			}
 
 			if (hashcmp((const uint8_t*) key, (const uint8_t*) _key)) {
-				fprintf(stderr, "[!] Password doesn't match !\n");
+				fprintf(stderr, "[!] Given key's don't match!\n");
+				return 1;
 			}
+
 			iter_folder(argv[i + 1], (const char*) key, 1);
 			break;
 		}
@@ -390,13 +395,16 @@ int main(int args, char** argv) {
 				break;
 			}
 
-			if (get_key("[+] Enter master key ->", key) && get_key("[+] Enter master key again ->", _key)) {
-				fprintf(stderr, "[!] Error: getting password input\n");
+			if (get_key("[+] Enter master key ->", key)) {
+				return 1;
+			}
+
+			if (get_key("[+] Enter master key again ->", _key)) {
 				return 1;
 			}
 
 			if (hashcmp((const uint8_t*) key, (const uint8_t*) _key)) {
-				fprintf(stderr, "[!] Password doesn't match !\n");
+				fprintf(stderr, "[!] Given key's don't match !\n");
 				return 1;
 			}
 

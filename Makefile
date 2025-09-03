@@ -7,6 +7,7 @@ flags = -lssl -lcrypto
 
 build:
 	gcc -o $(target) $(source) $(cflags) $(flags)
+	strip $(target)
 
 clean:
 	rm main

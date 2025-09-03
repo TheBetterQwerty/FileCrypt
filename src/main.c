@@ -88,7 +88,7 @@ void encrypt_file(const char* filename, const unsigned char* key) {
 	fseek(fptr, 0, SEEK_SET);
 
 	if (size <= 0) {
-		fprintf(stderr, "[!] Empyty file!\n");
+		fprintf(stderr, "[?] File %s is empty!\n", filename);
 		fclose(fptr);
 		return;
 	}
@@ -283,17 +283,11 @@ void iter_folder(const char* path, const char* key, int enc) {
 	}
 
 	if (S_ISREG(path_stat.st_mode)) {
-		if (enc) {
-			encrypt_file(path, (const unsigned char*) key);
-			return;
-		}
-		decrypt_file(path, (const unsigned char*) key);
+		enc ? encrypt_file(path, (const unsigned char*) key) : decrypt_file(path, (const unsigned char*) key);
 		return;
 	}
 
-	if (!S_ISDIR(path_stat.st_mode)) {
-		return;
-	}
+	if (!S_ISDIR(path_stat.st_mode)) return;
 
 	DIR* dir = opendir(path);
 	if (!dir) {
@@ -324,11 +318,13 @@ void iter_folder(const char* path, const char* key, int enc) {
 		}
 
 		if (S_ISREG(_path_stat.st_mode)) {
+			/*
 			if (enc) {
 				encrypt_file(file, (const unsigned char*) key);
 				continue;
 			}
-			decrypt_file(file, (const unsigned char*) key);
+			decrypt_file(file, (const unsigned char*) key); */
+			enc ? encrypt_file(file, (const unsigned char*) key) : decrypt_file(file, (const unsigned char*) key);
 		}
 	}
 

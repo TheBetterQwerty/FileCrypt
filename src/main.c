@@ -77,6 +77,9 @@ int get_key(const char* buf, char* key) {
 }
 
 void encrypt_file(const char* filename, const unsigned char* key) {
+	/*
+	 * Add "ENC" to the first after encryption
+	 * */
 	FILE* fptr = fopen(filename, "rb+");
 	if (!fptr) {
 		fprintf(stderr, "[!] %s\n", strerror(errno));
@@ -88,7 +91,6 @@ void encrypt_file(const char* filename, const unsigned char* key) {
 	fseek(fptr, 0, SEEK_SET);
 
 	if (size <= 0) {
-		fprintf(stderr, "[?] File %s is empty!\n", filename);
 		fclose(fptr);
 		return;
 	}
@@ -116,14 +118,12 @@ void encrypt_file(const char* filename, const unsigned char* key) {
 	}
 
 	unsigned char iv[IV_SIZE];
-	if (!RAND_bytes(iv, IV_SIZE))
-		handle_errors("Randbyte failed");
+	if (!RAND_bytes(iv, IV_SIZE)) handle_errors("Randbyte failed");
 
 	EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
     if (!ctx) handle_errors("EVP_CIPHER_CTX_new");
 
     int len = 0, ciphertext_len = 0;
-
     if (1 != EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv))
         handle_errors("EVP_EncryptInit_ex");
 
@@ -173,6 +173,9 @@ void encrypt_file(const char* filename, const unsigned char* key) {
 }
 
 void decrypt_file(const char* filename, const unsigned char* key) {
+	/*
+	 * If "ENC" not the first bytes then dont decrypt and skip the file
+	 * */
 	FILE* fptr = fopen(filename, "rb+");
 	if (!fptr) {
 		fprintf(stderr, "[!] %s\n", strerror(errno));
@@ -183,8 +186,7 @@ void decrypt_file(const char* filename, const unsigned char* key) {
 	size_t file_size = ftell(fptr) * sizeof(char);
 	fseek(fptr, 0, SEEK_SET); // go to start of file
 
-	if (file_size <= 0) {
-		fprintf(stderr, "[!] %s a empty file\n", filename);
+	if (file_size == 0) {
 		fclose(fptr);
 		return;
 	}
@@ -318,12 +320,6 @@ void iter_folder(const char* path, const char* key, int enc) {
 		}
 
 		if (S_ISREG(_path_stat.st_mode)) {
-			/*
-			if (enc) {
-				encrypt_file(file, (const unsigned char*) key);
-				continue;
-			}
-			decrypt_file(file, (const unsigned char*) key); */
 			enc ? encrypt_file(file, (const unsigned char*) key) : decrypt_file(file, (const unsigned char*) key);
 		}
 	}
@@ -352,7 +348,7 @@ int main(int args, char** argv) {
 	char key[SHA256_DIGEST_LENGTH], _key[SHA256_DIGEST_LENGTH];
 	int flag = 0;
 
-	for (int i = 0; i < args; i++) {
+	for (int i = 1; i < args; i++) {
 		if ((strcmp(argv[i], "--help") == 0) || (strcmp(argv[i], "-h") == 0)) {
 			print_help(argv[0]);
 			return 0;
@@ -392,15 +388,6 @@ int main(int args, char** argv) {
 			}
 
 			if (get_key("[+] Enter master key ->", key)) {
-				return 1;
-			}
-
-			if (get_key("[+] Enter master key again ->", _key)) {
-				return 1;
-			}
-
-			if (hashcmp((const uint8_t*) key, (const uint8_t*) _key)) {
-				fprintf(stderr, "[!] Given key's don't match !\n");
 				return 1;
 			}
 

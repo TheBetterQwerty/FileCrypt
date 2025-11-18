@@ -15,6 +15,9 @@
 #define AES_ENC 256
 #define IV_SIZE 16
 
+unsigned char magic_cookie[] = {0xDE, 0xAD, 0xBE, 0xEF}; // 0xDEADBEEF
+size_t magic_cookie_sz = sizeof(magic_cookie) / sizeof(magic_cookie[0]);
+
 void handle_errors(const char *msg) {
 	fprintf(stderr, "[!] Error: %s\n", msg);
     exit(EXIT_FAILURE);
@@ -77,9 +80,6 @@ int get_key(const char* buf, char* key) {
 }
 
 void encrypt_file(const char* filename, const unsigned char* key) {
-	/*
-	 * Add "ENC" to the first after encryption
-	 * */
 	FILE* fptr = fopen(filename, "rb+");
 	if (!fptr) {
 		fprintf(stderr, "[!] %s\n", strerror(errno));
@@ -140,6 +140,14 @@ void encrypt_file(const char* filename, const unsigned char* key) {
     EVP_CIPHER_CTX_free(ctx);
 
 	fseek(fptr, 0, SEEK_SET);
+	if (magic_cookie_sz != fwrite(magic_cookie, 1, magic_cookie_sz, fptr)) {
+		fprintf(stderr, "[!] Error writting magic cookie to file!\n");
+		fclose(fptr);
+		free(ciphertext);
+		free(buffer);
+		return;
+	}
+
 	if (IV_SIZE != fwrite(iv, 1, IV_SIZE, fptr)) {
 		fprintf(stderr, "[!] Error writting iv to file!\n");
 		fclose(fptr);
@@ -173,9 +181,6 @@ void encrypt_file(const char* filename, const unsigned char* key) {
 }
 
 void decrypt_file(const char* filename, const unsigned char* key) {
-	/*
-	 * If "ENC" not the first bytes then dont decrypt and skip the file
-	 * */
 	FILE* fptr = fopen(filename, "rb+");
 	if (!fptr) {
 		fprintf(stderr, "[!] %s\n", strerror(errno));
@@ -205,10 +210,17 @@ void decrypt_file(const char* filename, const unsigned char* key) {
 		return;
 	}
 
-	unsigned char iv[IV_SIZE];
-	memcpy(iv, buffer, IV_SIZE);
+	if (0 != memcmp(buffer, magic_cookie, magic_cookie_sz)) {
+		fprintf(stdout, "Skipping %s as it isn't encrypted\n", filename);
+		fclose(fptr);
+		free(buffer);
+		return;
+	}
 
-	char* buffer_offset = buffer + IV_SIZE; // move pointer to start of the message
+	unsigned char iv[IV_SIZE];
+	memcpy(iv, buffer + magic_cookie_sz, IV_SIZE);
+
+	char* buffer_offset = buffer + magic_cookie_sz + IV_SIZE; // move pointer to start of the message
 
 	unsigned char* out = (unsigned char*) malloc(file_size);
 	if (!out) {
@@ -236,7 +248,11 @@ void decrypt_file(const char* filename, const unsigned char* key) {
 		handle_errors("DecryptInit");
 	}
 
-	if (1 != EVP_DecryptUpdate(ctx, out, &len, (const unsigned char*) buffer_offset, file_size - IV_SIZE)) {
+	if (1 != EVP_DecryptUpdate(
+		ctx, out, &len,
+		(const unsigned char*) buffer_offset,
+		(file_size - IV_SIZE - magic_cookie_sz))
+	) {
 		free(buffer);
 		free(out);
 		fclose(fptr);
@@ -249,6 +265,7 @@ void decrypt_file(const char* filename, const unsigned char* key) {
 		free(buffer);
 		free(out);
 		fclose(fptr);
+		printf("[%d] %s\n", __LINE__, strerror(errno));
 		handle_errors("EVP_DecryptFinal_ex");
 	}
 

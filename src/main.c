@@ -82,6 +82,27 @@ int get_key(const char* buf, char* key) {
 	return 0;
 }
 
+void mkdir_all(const char* path) {
+	char dir[MAX_PATH];
+	struct stat statbuf;
+
+	char* start = (char*) path;
+	for (int i = 0; start[i] != '\0'; i++) {
+		if ((start[i] == '/') && (i - 1 >= 0)) {
+			memcpy(dir, start, i);
+			dir[i] = '\0';
+
+			if (stat(dir, &statbuf) == 0) {
+				continue;
+			}
+
+			if (mkdir(dir, 0755)) { // rwxr-xr-x
+				return;
+			}
+		}
+	}
+}
+
 int serialize_path(const char* current_file, char* output_file) {
 	int input_dir_size = strlen(input_path);
 	int output_file_size = strlen(output_path);
@@ -168,7 +189,7 @@ void decrypt_file(const char* filename, const char* outfile, const unsigned char
 			return;
 		}
 
-		if (nbytes == 0) return;
+		if (nbytes == 0) break;
 
 		if (1 != EVP_DecryptUpdate(ctx, plaintext, &len, buffer, nbytes)) {
 			fclose(fptr);
@@ -258,7 +279,7 @@ void encrypt_file(const char* filename, const char* outfile, const unsigned char
 			return;
 		}
 
-		if (nbytes == 0) return;
+		if (nbytes == 0) break;
 
 		if (1 != EVP_EncryptUpdate(ctx, ciphertext, &len, buffer, (int) nbytes))
 			handle_errors("EVP_EncryptUpdate");
@@ -293,6 +314,7 @@ void iter_folder(const char* path, const char* outpath, const unsigned char* key
 	}
 
 	if (S_ISREG(path_stat.st_mode)) {
+		mkdir_all(outpath);
 		enc ? encrypt_file(path, outpath, key) : decrypt_file(path, outpath, key);
 		return;
 	}
@@ -330,6 +352,7 @@ void iter_folder(const char* path, const char* outpath, const unsigned char* key
 		if (S_ISREG(_path_stat.st_mode)) {
 			char output_file[MAX_PATH];
 			if (serialize_path(file, output_file)) continue;
+			mkdir_all(output_file);
 			enc ? encrypt_file(file, output_file, key) : decrypt_file(file, output_file, key);
 		}
 	}

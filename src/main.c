@@ -21,10 +21,6 @@ size_t magic_cookie_sz = sizeof(magic_cookie) / sizeof(magic_cookie[0]);
 char* output_path = NULL;
 char* input_path = NULL;
 
-/*
- * [Nonce][Chunks][tag]
- */
-
 void handle_errors(const char *msg) {
 	fprintf(stderr, "[!] Error: %s\n", msg);
     exit(EXIT_FAILURE);
@@ -122,22 +118,42 @@ int serialize_path(const char* current_file, char* output_file) {
 }
 
 void decrypt_file(const char* filename, const char* outfile, const unsigned char* key) {
-	FILE* fptr = fopen(filename, "rb");
+	FILE *fptr = fopen(filename, "rb"), *out_ptr = NULL;
 	if (!fptr) {
 		fprintf(stderr, "[!] Error: %s\n", strerror(errno));
 		return;
 	}
 
-	fseek(fptr, 0, SEEK_END);
-	size_t size = ftell(fptr) * sizeof(char);
-	fseek(fptr, 0, SEEK_SET);
+	unsigned char ciphertext[CHUNK_SIZE];
+	unsigned char decrypted[CHUNK_SIZE + EVP_MAX_BLOCK_LENGTH]; 
+	unsigned char mgc_cookie_check[4] = { 0 };
+	unsigned char nonce[12] = { 0 }, tag[16] = {0 };
 
-	if (size == 0) {
-		fclose(fptr);
-		return;
+	char finished = 0x0;
+		
+	if (fseek(fptr, 0, SEEK_END) != 0) {
+		goto cleanup;
 	}
 	
-	unsigned char mgc_cookie_check[4] = { 0 };
+	size_t size = ftell(fptr);
+
+	if (size < 32) {
+		fprintf(stderr, "[?] Skipping not a encrypted file\n");
+		goto cleanup;
+	}
+
+	if (fseek(fptr, -16, SEEK_END) != 0) {
+		goto cleanup;
+	}
+
+	if (16 != fread(tag, 1, 16, fptr)) {
+		fprintf(stderr, "[!] Error: %s\n", strerror(errno));
+		goto cleanup;
+	}
+
+	size_t cipher_len = (size_t) size - 16 - 12 - 4; // Metadata size is 16 + 12 + 4
+	rewind(fptr);
+
 	if (4 != fread(mgc_cookie_check, 1, 4, fptr)) {
 		fprintf(stderr, "[!] Error: %s\n", strerror(errno));
 		return;
@@ -148,16 +164,89 @@ void decrypt_file(const char* filename, const char* outfile, const unsigned char
 		return;
 	}
 
-	unsigned char nonce[12] = { 0 };
 	if (12 != fread(nonce, 1, 12, fptr)) {
 		fprintf(stderr, "[!] Error: %s\n", strerror(errno));
 		return;
 	}
 
+	// Setup AES stuff
+	EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+	if (!ctx) {
+		fprintf(stderr, "[!] Error: %s\n", strerror(errno));
+		goto cleanup;
+	}
+
+	if (EVP_DecryptInit_ex(
+				ctx, 
+				EVP_aes_256_gcm(),
+				NULL,
+				key,
+				nonce
+		) != 1
+	) {
+		goto cleanup;
+	}
+
+	out_ptr = fopen(outfile, "wb");
+	if (!out_ptr) {
+		fprintf(stderr, "[!] Error: %s\n", strerror(errno));
+		goto cleanup;
+	}
+	
+	size_t total_read = 0;
+	int bytes_decry = 0;
+
+	// Tag size 16
+	while (total_read < cipher_len) { 
+		size_t chunk = (cipher_len - total_read) > CHUNK_SIZE ? CHUNK_SIZE : (cipher_len - total_read);
+
+		size_t nread = fread(ciphertext, 1, chunk, fptr);
+		if (nread == 0) break;
+
+		// decrypt the chunk
+		if (1 != EVP_DecryptUpdate(
+			ctx, 
+			decrypted,
+			&bytes_decry,
+			ciphertext,
+			nread
+		)) {
+			fprintf(stderr, "[!] Error: LMAO %s\n", strerror(errno));
+			goto cleanup;
+		}
+
+		if (bytes_decry > 0 && (size_t) bytes_decry != fwrite(decrypted, 1, bytes_decry, out_ptr)) {
+			fprintf(stderr, "[!] Error: Writting to file!\n");
+			goto cleanup;
+		}
+
+		total_read += nread;
+	}
+
+	if (EVP_CIPHER_CTX_ctrl(
+				ctx,
+				EVP_CTRL_GCM_SET_TAG,
+				16,
+				tag
+				) != 1) {
+		goto cleanup;
+	}
+
+	if (1 != EVP_DecryptFinal_ex(ctx, decrypted, &bytes_decry)) {
+		fprintf(stderr, "[!] Error: Authentication Failed\n");
+		goto cleanup;
+	}
+	
+	if (bytes_decry > 0 && (size_t) bytes_decry != fwrite(decrypted, 1, bytes_decry, out_ptr)) {
+		fprintf(stderr, "[!] Error: Writting to file\n");
+		goto cleanup;
+	}
+	
+	finished = 0x01;
 cleanup:
-	fclose(fptr);
-	// fclose(outptr);
-	printf("[+] File %s was decrypted and stored at %s\n", filename, outfile);
+	if (fptr) fclose(fptr);
+	if (out_ptr) fclose(out_ptr);
+	if (finished) printf("[+] File %s was decrypted and stored at %s\n", filename, outfile);
 }
 
 void encrypt_file(const char* filename, const char* outfile, const unsigned char* key) {

@@ -14,7 +14,7 @@
 #define MAX_PATH	2096
 #define AES_ENC		256
 #define IV_SIZE		16
-#define CHUNK_SIZE	64 * 1024
+#define CHUNK_SIZE	(64 * 1024)
 
 unsigned char magic_cookie[] = {0xDE, 0xAD, 0xBE, 0xEF}; // 0xDEADBEEF
 size_t magic_cookie_sz = sizeof(magic_cookie) / sizeof(magic_cookie[0]);
@@ -118,6 +118,7 @@ int serialize_path(const char* current_file, char* output_file) {
 }
 
 void decrypt_file(const char* filename, const char* outfile, const unsigned char* key) {
+	EVP_CIPHER_CTX* ctx = NULL;
 	FILE *fptr = fopen(filename, "rb"), *out_ptr = NULL;
 	if (!fptr) {
 		fprintf(stderr, "[!] Error: %s\n", strerror(errno));
@@ -152,6 +153,8 @@ void decrypt_file(const char* filename, const char* outfile, const unsigned char
 	}
 
 	size_t cipher_len = (size_t) size - 16 - 12 - 4; // Metadata size is 16 + 12 + 4
+	uint64_t n_chunks = (cipher_len / CHUNK_SIZE) + 1;
+
 	rewind(fptr);
 
 	if (4 != fread(mgc_cookie_check, 1, 4, fptr)) {
@@ -170,7 +173,7 @@ void decrypt_file(const char* filename, const char* outfile, const unsigned char
 	}
 
 	// Setup AES stuff
-	EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+	ctx = EVP_CIPHER_CTX_new();
 	if (!ctx) {
 		fprintf(stderr, "[!] Error: %s\n", strerror(errno));
 		goto cleanup;
@@ -197,6 +200,7 @@ void decrypt_file(const char* filename, const char* outfile, const unsigned char
 	int bytes_decry = 0;
 
 	// Tag size 16
+	uint64_t current_cnk = 0;
 	while (total_read < cipher_len) { 
 		size_t chunk = (cipher_len - total_read) > CHUNK_SIZE ? CHUNK_SIZE : (cipher_len - total_read);
 
@@ -221,8 +225,11 @@ void decrypt_file(const char* filename, const char* outfile, const unsigned char
 		}
 
 		total_read += nread;
+
+		printf("\r[#] Decrypting Chunk =======> (%ld/%ld)", ++current_cnk, n_chunks);
 	}
 
+	printf("\n");
 	if (EVP_CIPHER_CTX_ctrl(
 				ctx,
 				EVP_CTRL_GCM_SET_TAG,
@@ -244,40 +251,46 @@ void decrypt_file(const char* filename, const char* outfile, const unsigned char
 	
 	finished = 0x01;
 cleanup:
+	if(ctx) EVP_CIPHER_CTX_free(ctx);
 	if (fptr) fclose(fptr);
 	if (out_ptr) fclose(out_ptr);
 	if (finished) printf("[+] File %s was decrypted and stored at %s\n", filename, outfile);
 }
 
 void encrypt_file(const char* filename, const char* outfile, const unsigned char* key) {
+	EVP_CIPHER_CTX* ctx = NULL;
+	char finished = 0x0;
+
 	if (!strcmp(filename, outfile)) {
 		fprintf(stderr, "[!] Error: File names are same\n");
 		return;
 	}
 
-	FILE* fptr = fopen(filename, "rb");
+	FILE *fptr = fopen(filename, "rb"), *outptr = NULL;
 	if (!fptr) {
 		fprintf(stderr, "[!] Error: %s\n", strerror(errno));
 		return;
 	}
 
-	FILE* outptr = fopen(outfile, "wb");
+	fseek(fptr, 0, SEEK_END);
+	uint64_t n_chunks = (ftell(fptr) / CHUNK_SIZE) + 1;
+	rewind(fptr);
+
+	outptr = fopen(outfile, "wb");
 	if (!outptr) {
 		fprintf(stderr, "[!] Error: %s\n", strerror(errno));
-		fclose(fptr);
-		return;
+		goto cleanup;
 	}
 
 	unsigned char buffer[CHUNK_SIZE];
 	unsigned char nonce[12], tag[16];
 	unsigned char encrypted_buffer[CHUNK_SIZE + EVP_MAX_BLOCK_LENGTH];
 	
-	EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+	
+	ctx = EVP_CIPHER_CTX_new();
 	if (!ctx) {
 		fprintf(stderr, "[!] Error: %s\n", strerror(errno));
-		fclose(fptr);
-		fclose(outptr);
-		return;
+		goto cleanup;
 	}
 
 	if (RAND_bytes(nonce, 12) != 1 || 
@@ -304,6 +317,7 @@ void encrypt_file(const char* filename, const char* outfile, const unsigned char
 	
 	size_t nread = 0;
 	int written = 0;
+	uint64_t current_chk = 0;
 
 	while ((nread = fread(buffer, 1, CHUNK_SIZE, fptr)) > 0) {
 		if (1 != EVP_EncryptUpdate(ctx, encrypted_buffer, &written, buffer, (int)nread)) {
@@ -315,7 +329,11 @@ void encrypt_file(const char* filename, const char* outfile, const unsigned char
 			fprintf(stderr, "[!] Error: writting to file\n");
 			goto cleanup;
 		}
+
+		printf("\r[#] Encrypting Chunk ======================> (%ld/%ld)", ++current_chk, n_chunks);
 	}
+
+	printf("\n");
 
 	if (ferror(fptr)) goto cleanup;
 
@@ -335,11 +353,13 @@ void encrypt_file(const char* filename, const char* outfile, const unsigned char
 		goto cleanup;
 	}
 
+	finished = 0x01;
+
 cleanup:
-	EVP_CIPHER_CTX_free(ctx);
-	fclose(fptr);
-	fclose(outptr);
-	printf("[+] File %s was encrypted and stored at %s\n", filename, outfile);
+	if (ctx) EVP_CIPHER_CTX_free(ctx);
+	if (fptr) fclose(fptr);
+	if (outptr) fclose(outptr);
+	if (finished) printf("[+] File %s was encrypted and stored at %s\n", filename, outfile);
 	return;
 }
 
